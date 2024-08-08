@@ -80,17 +80,19 @@ def plot_covariance(covar_path, cov_labels=None, log_abs=True, output_dir=None, 
         covar_path_ls = [covar_path]
     fig, ax = plt.subplots(18, 7, sharex=True, dpi=300, figsize=(16, 30))
     for cov_no, path in enumerate(covar_path_ls):
-        covar = sacc.Sacc.load_fits(covar_path)
+        covar = sacc.Sacc.load_fits(path)
+        e_l, _ = covar.get_ell_cl('cl_bb', f'band1', f'band1')
         for sub_ind, (t1, t2, t3, t4) in enumerate(itertools.combinations_with_replacement('123456', 4)):
-            ind12 = coadd_ttl_k.indices('cl_bb', (f'band{t1}', f'band{t2}'))
-            ind34 = coadd_ttl_k.indices('cl_bb', (f'band{t3}', f'band{t4}'))
-            sim_cov = coadd_ttl_k.covariance.covmat[ind12][:, ind34]
+            ind12 = covar.indices('cl_bb', (f'band{t1}', f'band{t2}'))
+            ind34 = covar.indices('cl_bb', (f'band{t3}', f'band{t4}'))
+            sim_cov = covar.covariance.covmat[ind12][:, ind34]
             sim_diag = np.diagonal(sim_cov).copy()
             if cov_labels is not None:
                 lb = cov_labels[cov_no]
             else:
                 lb = cov_no
             
+            msk = (e_l > 30) * (e_l < 300)
             if log_abs:
                 ax[sub_ind//7, sub_ind%7].loglog(e_l[msk], np.abs(sim_diag[msk]), label=f"{lb}")
             else:

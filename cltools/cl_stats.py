@@ -1,6 +1,4 @@
 import numpy as np
-import healpy as hp
-import pymaster as nmt
 
 
 def knox_covar(cl13, cl24, cl14, cl23, fsky, e_l, bin_wth):

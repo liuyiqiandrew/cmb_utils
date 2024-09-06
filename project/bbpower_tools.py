@@ -93,7 +93,7 @@ def plot_cls_best_fit(cl_coadd_path, covar_path, cl_emcee_path=None, output_dir=
     """
     cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
     if cl_emcee_path is not None:
-        cl_emcee = np.load(cl_emcee_path)['cls']
+        cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
     covar = sacc.Sacc.load_fits(covar_path)
 
     fig, ax = plt.subplots(6, 6, sharex=True, dpi=300, figsize=(15, 12))
@@ -110,7 +110,11 @@ def plot_cls_best_fit(cl_coadd_path, covar_path, cl_emcee_path=None, output_dir=
         ax[j, i].errorbar(e_l[msk], dl[msk], np.sqrt(var)[msk])
         if cl_emcee_path is not None:
             cl_emcee_single = cl_emcee[:, i, j]
-            ax[j, i].loglog(e_l[msk], cl_emcee_single)
+            block_cov = covar.covariance.covmat[cov_ind[msk]][:, cov_ind[msk]]
+            cl_diff = cl_emcee_single - dl[msk]
+            block_chi2 = (cl_diff * np.linalg.solve(block_cov, cl_diff)).sum()
+            ax[j, i].loglog(e_l[msk], cl_emcee_single, label=f'$\\chi^2=${block_chi2:.2f}\ndof = {msk.sum()}')
+            ax[j, i].legend()
         ax[j, i].set_title(f'{i+1}x{j+1}')
         ax[j, i].set_xlim(28, 330)
         if j == 5:

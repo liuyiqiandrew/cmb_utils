@@ -1,5 +1,6 @@
 import healpy as hp
 import numpy as np
+import pymaster as nmt
 
 
 def lat2mask(nside, lat):
@@ -24,3 +25,16 @@ def carrbox2hpmask(nside, box):
         ra_cut = (pix_ang[0] > box[0, 1]) * (pix_ang[0] < box[1, 1])
     dec_cut = (pix_ang[1] > box[0, 0]) * (pix_ang[1] < box[1, 0])
     return ra_cut * dec_cut
+
+
+def apodize_square_mask(mask):
+    """
+    Apodize a square mask by creating round corners and then apply C2
+    """
+    ZERO = 1e-3
+    nhg = hp.smoothing(mask, 4 / 180 * np.pi)
+    nhg[nhg < 0] = 0
+    nhg /= nhg.max()
+    tmp_mask = nhg > ZERO
+    ap_mask = nmt.mask_apodization(tmp_mask, 10, "C2")
+    return ap_mask

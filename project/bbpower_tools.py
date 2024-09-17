@@ -87,7 +87,7 @@ def mean2yaml(mean, template, ofname, include_moment=False):
         yaml.dump(template, ostream)
 
 
-def plot_cls_best_fit(cl_coadd_path, covar_path, cl_emcee_path=None, output_dir=None, annotation='_emcee'):
+def plot_cls_best_fit(cl_coadd_path, covar_path, loglog=True, cl_emcee_path=None, output_dir=None, annotation='_emcee'):
     """
     Plot the best fit power spectra outputed by the modified single point.
     """
@@ -121,6 +121,8 @@ def plot_cls_best_fit(cl_coadd_path, covar_path, cl_emcee_path=None, output_dir=
             ax[j, i].set_xlabel(r"$\ell$")
         if i == 0:
             ax[j, i].set_ylabel(r"D$\ell^{BB}$ [$\mu$K$^2$]")
+        if loglog:
+            ax[j, i].loglog()
     fig.tight_layout()
     if output_dir is not None:
         fig.savefig(f"{output_dir}/cls_best_fit{annotation}.png", bbox_inches='tight')

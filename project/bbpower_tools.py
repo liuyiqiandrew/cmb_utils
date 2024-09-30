@@ -43,6 +43,9 @@ def save_cleaned_chains_e(fdir):
     try:
         tau = reader.get_autocorr_time(tol=50)
         taust = 'good tau'
+        burnin = int(5. * np.max(tau))
+        thin = int(0.5 * np.max(tau))
+        samples = reader.get_chain(discard=burnin, flat=True, thin=thin)
     except:
         taust = 'POTENTIALLY BAD TAU'
         tau = reader.get_autocorr_time(tol=0)
@@ -168,6 +171,8 @@ def plot_covariance(covar_path, cov_labels=None, log_abs=True, output_dir=None, 
     """
     if not isinstance(covar_path, list):
         covar_path_ls = [covar_path]
+    else:
+        covar_path_ls = covar_path
     fig, ax = plt.subplots(18, 7, sharex=True, dpi=300, figsize=(16, 30))
     for cov_no, path in enumerate(covar_path_ls):
         covar = sacc.Sacc.load_fits(path)

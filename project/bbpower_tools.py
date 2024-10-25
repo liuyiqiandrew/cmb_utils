@@ -131,6 +131,83 @@ def plot_cls_best_fit(cl_coadd_path, covar_path, loglog=True, cl_emcee_path=None
         fig.savefig(f"{output_dir}/cls_best_fit{annotation}.png", bbox_inches='tight')
 
 
+def calc_block_chi2(
+    cl_coadd_path: str, 
+    covar_path: str, 
+    cl_emcee_path: str
+):
+    """
+    Get the chi2 for each block of selected outputs.
+    """
+    cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    if cl_emcee_path is not None:
+        cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
+    covar = sacc.Sacc.load_fits(covar_path)
+
+    block_chi2_arr = np.zeros(21)
+    ind1_arr = np.zeros(21)
+    ind2_arr = np.zeros(21)
+
+    for idx, (i, j) in enumerate(itertools.combinations_with_replacement(range(6), 2)):
+        e_l, dl= cl_coadd.get_ell_cl('cl_bb', f'band{i+1}', f'band{j+1}')
+        msk = (e_l > 30) * (e_l < 300)
+                
+        cov_ind = covar.indices('cl_bb', (f'band{i+1}', f'band{j+1}'))
+        
+        cl_emcee_single = cl_emcee[:, i, j]
+        block_cov = covar.covariance.covmat[cov_ind[msk]][:, cov_ind[msk]]
+        cl_diff = cl_emcee_single - dl[msk]
+        block_chi2 = (cl_diff * np.linalg.solve(block_cov, cl_diff)).sum()
+        block_chi2_arr[idx] = block_chi2
+        ind1_arr[idx] = i
+        ind2_arr[idx] = j
+    return block_chi2_arr, ind1_arr, ind2_arr
+
+
+
+def print_cls_chi2(cl_coadd_path, covar_path, cl_emcee_path):
+    """ print chi2 contribution for each cross term """
+    cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
+    covar = sacc.Sacc.load_fits(covar_path)
+    inv_cov = np.linalg.solve(covar.covariance.covmat, np.identity(covar.covariance.covmat.shape[0]))
+    counter = 0
+    out_header = ""
+    out_info = ""
+    chi2_total = 0
+    for t1, t2, t3, t4 in itertools.combinations_with_replacement('123456', 4):
+        counter += 1
+        header= f"{t1}{t2}x{t3}{t4}"
+        out_header += f"{header:<15}"
+        e_l, dl12= cl_coadd.get_ell_cl('cl_bb', f'band{t1}', f'band{t2}')
+        e_l, dl34= cl_coadd.get_ell_cl('cl_bb', f'band{t3}', f'band{t4}')
+        msk = (e_l > 30) * (e_l < 300)
+
+        cov_ind12 = covar.indices('cl_bb', (f'band{t1}', f'band{t2}'))
+        cov_ind34 = covar.indices('cl_bb', (f'band{t3}', f'band{t4}'))
+
+        cl_emcee_single12 = cl_emcee[:, int(t1) - 1, int(t2) - 1]
+        cl_emcee_single34 = cl_emcee[:, int(t3) - 1, int(t4) - 1]
+        cl_diff12 = cl_emcee_single12 - dl12[msk]
+        cl_diff34 = cl_emcee_single34 - dl34[msk]
+
+        inv_cov_slice = inv_cov[cov_ind12[msk]][:, cov_ind34[msk]]
+        info = f"{np.dot(cl_diff34, np.dot(inv_cov_slice, cl_diff12)):.2f}"
+        if f"{t1}{t2}" == f"{t3}{t4}":
+            chi2_total += np.dot(cl_diff34, np.dot(inv_cov_slice, cl_diff12))
+        else:
+            chi2_total += np.dot(cl_diff34, np.dot(inv_cov_slice, cl_diff12)) * 2
+        out_info += f"{info:<15}"
+        if counter == 7:
+            counter = 0
+            print(out_header)
+            print(out_info)
+            out_header = ""
+            out_info = ""
+    print(f"Chi2 : {chi2_total}")
+
+
+
 def plot_cls_fit_bias(cl_coadd_path, cl_emcee_path, covar_path, output_dir=None, annotation='_emcee'):
     """
     Plot the bias of best-fit power spectra outputed by the modified single point. Measured in 

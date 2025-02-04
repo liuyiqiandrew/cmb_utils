@@ -164,6 +164,43 @@ def calc_block_chi2(
     return block_chi2_arr, ind1_arr, ind2_arr
 
 
+def calc_full_block_chi2(
+    cl_coadd_path: str, 
+    covar_path: str, 
+    cl_emcee_path: str
+):
+    """
+    Get the chi2 for each block of selected outputs.
+    """
+    cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    if cl_emcee_path is not None:
+        cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
+    covar = sacc.Sacc.load_fits(covar_path)
+
+    e_l, _ = cl_coadd.get_ell_cl('cl_bb', f'band1', f'band1')
+    msk = (e_l > 30) * (e_l < 300)
+    covar_ind = []
+    diff_dls = []
+    for i, j in itertools.combinations_with_replacement(range(6), 2):
+                
+        cov_ind = covar.indices('cl_bb', (f'band{i+1}', f'band{j+1}'))
+        covar_ind.append(cov_ind[msk])
+        
+        cl_emcee_single = cl_emcee[:, i, j]
+        _, dl = cl_coadd.get_ell_cl('cl_bb', f'band{i+1}', f'band{j+1}')
+        diff_dls.append(dl[msk] - cl_emcee_single)
+
+    covar_ind_arr = np.concatenate(covar_ind)
+    diff_dls_arr = np.concatenate(diff_dls)
+    block_cov = covar.covariance.covmat[covar_ind_arr][:, covar_ind_arr]
+    block_chi2 = diff_dls_arr * np.linalg.solve(block_cov, diff_dls_arr)
+    inc = msk.sum()
+    result_chi2 = np.zeros(21)
+    for i in range(21):
+        result_chi2[i] = block_chi2[i*inc:(i+1)*inc].sum()
+    return result_chi2
+
+
 
 def print_cls_chi2(cl_coadd_path, covar_path, cl_emcee_path):
     """ print chi2 contribution for each cross term """
@@ -205,7 +242,6 @@ def print_cls_chi2(cl_coadd_path, covar_path, cl_emcee_path):
             out_header = ""
             out_info = ""
     print(f"Chi2 : {chi2_total}")
-
 
 
 def plot_cls_fit_bias(cl_coadd_path, cl_emcee_path, covar_path, output_dir=None, annotation='_emcee'):

@@ -131,6 +131,164 @@ def plot_cls_best_fit(cl_coadd_path, covar_path, loglog=True, cl_emcee_path=None
         fig.savefig(f"{output_dir}/cls_best_fit{annotation}.png", bbox_inches='tight')
 
 
+def plot_cls_best_fit_v2(
+    cl_coadd_path, 
+    covar_path, 
+    tracers,
+    loglog=True,
+    cl_emcee_path=None, 
+    output_dir=None, 
+    annotation='_emcee'
+):
+    """
+    Plot the best fit power spectra outputed by the modified single point.
+    """
+    cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    if cl_emcee_path is not None:
+        cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
+    covar = sacc.Sacc.load_fits(covar_path)
+
+    ntr = tracers.__len__()
+
+    fig, ax = plt.subplots(ntr, ntr, sharex=True, dpi=500, figsize=(35, 28))
+    for i, j in itertools.product(range(ntr), range(ntr)):
+        ax[i, j].set_axis_off()
+    for i, j in itertools.combinations_with_replacement(range(ntr), 2):
+        e_l, dl= cl_coadd.get_ell_cl('cl_bb', tracers[i], tracers[j])
+        msk = (e_l > 30) * (e_l < 300)
+                
+        cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
+        var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
+        cl2dl = e_l * (e_l - 1) / 2 / np.pi        
+        ax[j, i].set_axis_on()
+        ax[j, i].errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk])
+        if cl_emcee_path is not None:
+            cl_emcee_single = cl_emcee[:, i, j]
+            block_cov = covar.covariance.covmat[cov_ind[msk]][:, cov_ind[msk]]
+            cl_diff = cl_emcee_single - dl[msk]
+            block_chi2 = (cl_diff * np.linalg.solve(block_cov, cl_diff)).sum()
+            ax[j, i].loglog(e_l[msk], cl_emcee_single, label=f'$\\chi^2=${block_chi2:.2f}\ndof = {msk.sum()}')
+            ax[j, i].legend()
+        ax[j, i].set_title(f'{tracers[i]}\n{tracers[j]}')
+        ax[j, i].set_xlim(28, 330)
+        if j == ntr - 1:
+            ax[j, i].set_xlabel(r"$\ell$")
+        if i == 0:
+            ax[j, i].set_ylabel(r"D$\ell^{BB}$ [$\mu$K$^2$]")
+        if loglog:
+            ax[j, i].loglog()
+    fig.tight_layout()
+    if output_dir is not None:
+        fig.savefig(f"{output_dir}/cls_best_fit{annotation}.png", bbox_inches='tight')
+
+
+def _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl):
+    if fg_ell is not None:
+        if dust_cl is not None:
+            assert(dust_cl.shape[0] == ntr)
+            assert(dust_cl.shape[1] == fg_ell.shape[0])
+        if sync_cl is not None:
+            assert(sync_cl.shape[0] == ntr)
+            assert(sync_cl.shape[1] == fg_ell.shape[0])
+        if dust_cl is None and sync_cl is None:
+            raise ValueError("fg_ell is given but both dust_cl and sync_cl are None")
+        if convert_cl2dl:
+            fg_cl2dl = fg_ell * (fg_ell - 1) / 2 / np.pi
+        else:
+            fg_cl2dl = 1.0
+        return fg_cl2dl, (fg_ell > 30) * (fg_ell < 300)
+    else:
+        return None, None
+    
+
+def _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmb_r1_cl, convert_cl2dl):
+    if cmb_ell is not None:
+        assert(cmbl_cl is not None)
+        assert(cmbl_cl.shape[0] == cmb_ell.shape[0])
+        if r is not None:
+            assert(cmb_r1_cl is not None)
+            assert(cmb_r1_cl.shape[0] == cmb_ell.shape[0])
+            cmbr_cl = cmbl_cl + r * (cmb_r1_cl - cmbl_cl)
+        else:
+            cmbr_cl = None
+        if convert_cl2dl:
+            cmb_cl2dl = cmb_ell * (cmb_ell - 1) / 2 / np.pi
+        else:
+            cmb_cl2dl = 1.0
+        return cmb_cl2dl, (cmb_ell > 30) * (cmb_ell < 300), cmbr_cl
+    else:
+        return None, None, None
+
+
+def plot_cls_best_fit_individual(
+    cl_coadd_path : str,
+    covar_path : str,
+    tracers : list[str],
+    loglog : bool = True,
+    cl_emcee_path : str | None = None,
+    output_dir : str | None = None,
+    annotation : str = '_emcee',
+    convert_cl2dl : bool = True,
+    fg_ell : np.ndarray | None = None,
+    dust_cl : np.ndarray | None = None,
+    sync_cl : np.ndarray | None = None,
+    cmb_ell : np.ndarray | None = None,
+    cmbl_cl : np.ndarray | None = None,
+    r : float | None = None,
+    cmbr1_cl : np.ndarray | None = None,
+):
+    """
+    Plot the best fit power spectra outputed by the modified single point.
+    """
+    cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    if cl_emcee_path is not None:
+        cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
+    covar = sacc.Sacc.load_fits(covar_path)
+
+    ntr = tracers.__len__()
+
+    fg_cl2dl, fgmsk = _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl)
+    cmb_cl2dl, cmbmsk, cmbr_cl = _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmbr1_cl, convert_cl2dl)
+
+    for i, j in itertools.combinations_with_replacement(range(ntr), 2):
+        e_l, dl= cl_coadd.get_ell_cl('cl_bb', tracers[i], tracers[j])
+        msk = (e_l > 30) * (e_l < 300)
+        plt.figure(figsize=(7, 5), dpi=300)
+        cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
+        var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
+        if convert_cl2dl:
+            cl2dl = e_l * (e_l - 1) / 2 / np.pi
+        else:
+            cl2dl = 1.0
+        plt.errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk])
+        if cl_emcee_path is not None:
+            cl_emcee_single = cl_emcee[:, i, j]
+            block_cov = covar.covariance.covmat[cov_ind[msk]][:, cov_ind[msk]]
+            cl_diff = cl_emcee_single - dl[msk]
+            block_chi2 = (cl_diff * np.linalg.solve(block_cov, cl_diff)).sum()
+            plt.loglog(e_l[msk], cl_emcee_single, label=f'$\\chi^2=${block_chi2:.2f}\ndof = {msk.sum()}')
+            plt.legend()
+        plt.title(f'{tracers[i]}\n{tracers[j]}')
+        plt.xlim(28, 330)
+        plt.xlabel(r"$\ell$")
+        plt.ylabel(r"D$\ell^{BB}$ [$\mu$K$^2$]")
+        if loglog:
+            plt.loglog()
+
+        if dust_cl is not None:
+            plt.loglog(fg_ell[fgmsk], (np.sqrt(dust_cl[i] * dust_cl[j]) * fg_cl2dl)[fgmsk], ls='--', label='dust model')
+        if sync_cl is not None:
+            plt.loglog(fg_ell[fgmsk], (np.sqrt(sync_cl[i] * sync_cl[j]) * fg_cl2dl)[fgmsk], ls='.-', label='sync model')
+        if cmb_ell is not None:
+            plt.loglog(cmb_ell[cmbmsk], (cmbl_cl * cmb_cl2dl)[cmbmsk], ls='-', c='k', label='CMB Lensing')
+            if r is not None:
+                plt.loglog(cmb_ell[cmbmsk], (cmbr_cl * cmb_cl2dl)[cmbmsk], ls='--', c='k', label=f'CMB Lensing + r={r:.3f}')
+        plt.legend()
+
+        if output_dir is not None:
+            plt.savefig(f"{output_dir}/cls_best_fit{annotation}_{tracers[i]}_{tracers[j]}.png", bbox_inches='tight')
+
+
 def calc_block_chi2(
     cl_coadd_path: str, 
     covar_path: str, 
@@ -279,6 +437,40 @@ def plot_cls_fit_bias(cl_coadd_path, cl_emcee_path, covar_path, output_dir=None,
 
 
 def plot_covariance(covar_path, cov_labels=None, log_abs=True, output_dir=None, anotation=''):
+    """
+    Plot one or a list of 6-channel covariance given pathese to covariances.
+    """
+    if not isinstance(covar_path, list):
+        covar_path_ls = [covar_path]
+    else:
+        covar_path_ls = covar_path
+    fig, ax = plt.subplots(18, 7, sharex=True, dpi=300, figsize=(16, 30))
+    for cov_no, path in enumerate(covar_path_ls):
+        covar = sacc.Sacc.load_fits(path)
+        e_l, _ = covar.get_ell_cl('cl_bb', f'band1', f'band1')
+        for sub_ind, (t1, t2, t3, t4) in enumerate(itertools.combinations_with_replacement('123456', 4)):
+            ind12 = covar.indices('cl_bb', (f'band{t1}', f'band{t2}'))
+            ind34 = covar.indices('cl_bb', (f'band{t3}', f'band{t4}'))
+            sim_cov = covar.covariance.covmat[ind12][:, ind34]
+            sim_diag = np.diagonal(sim_cov).copy()
+            if cov_labels is not None:
+                lb = cov_labels[cov_no]
+            else:
+                lb = cov_no
+            
+            msk = (e_l > 30) * (e_l < 300)
+            if log_abs:
+                ax[sub_ind//7, sub_ind%7].loglog(e_l[msk], np.abs(sim_diag[msk]), label=f"{lb}")
+            else:
+                ax[sub_ind//7, sub_ind%7].plot(e_l[msk], sim_diag[msk], label=f"{lb}")
+
+            ax[sub_ind//7, sub_ind%7].set_title(f'{t1}{t2}x{t3}{t4}')
+    ax[0, 0].legend()
+    if output_dir is not None:
+        fig.savefig(f"{output_dir}/covariance{anotation}.png", bbox_inches='tight')
+
+
+def plot_covariance_v2(covar_path, cov_labels=None, log_abs=True, output_dir=None, anotation=''):
     """
     Plot one or a list of 6-channel covariance given pathese to covariances.
     """

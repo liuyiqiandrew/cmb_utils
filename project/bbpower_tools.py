@@ -183,6 +183,7 @@ def plot_cls_best_fit_v2(
 
 
 def _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl):
+    """ Check the format of foreground Cls and return the cl2dl conversion factor and Cl mask """
     if fg_ell is not None:
         if dust_cl is not None:
             assert(dust_cl.shape[0] == ntr)
@@ -202,6 +203,7 @@ def _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl):
     
 
 def _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmb_r1_cl, convert_cl2dl):
+    """ Check the format of CMB Cls and return the cl2dl conversion factor, Cl mask, r = 1 B-mode Cls """
     if cmb_ell is not None:
         assert(cmbl_cl is not None)
         assert(cmbl_cl.shape[0] == cmb_ell.shape[0])
@@ -220,10 +222,60 @@ def _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmb_r1_cl, convert_cl2dl):
         return None, None, None
 
 
+def _plot_emcee_fit(cl_emcee_path, cl_emcee, covar, cov_ind, e_l, dl, msk, i, j):
+    """ plot emcee fit on the current plt axis """
+    if cl_emcee_path is not None:
+        cl_emcee_single = cl_emcee[:, i, j]
+        block_cov = covar.covariance.covmat[cov_ind[msk]][:, cov_ind[msk]]
+        cl_diff = cl_emcee_single - dl[msk]
+        block_chi2 = (cl_diff * np.linalg.solve(block_cov, cl_diff)).sum()
+        plt.loglog(e_l[msk], cl_emcee_single, label=f'$\\chi^2=${block_chi2:.2f}\ndof = {msk.sum()}')
+
+
+
+def _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmbr_cl, r, cmb_cl2dl, fgmsk, cmbmsk, i, j):
+    """ Plot foreground and CMB Cls on the current plt axis """
+    if dust_cl is not None:
+        plt.loglog(fg_ell[fgmsk], (np.sqrt(dust_cl[i] * dust_cl[j]) * fg_cl2dl)[fgmsk], ls='--', label='Dust')
+    if sync_cl is not None:
+        plt.loglog(fg_ell[fgmsk], (np.sqrt(sync_cl[i] * sync_cl[j]) * fg_cl2dl)[fgmsk], ls='-.', label='Sync')
+    if cmb_ell is not None:
+        plt.loglog(cmb_ell[cmbmsk], (cmbl_cl * cmb_cl2dl)[cmbmsk], ls='-', c='k', label='CMB Lensing')
+        if r is not None:
+            plt.loglog(cmb_ell[cmbmsk], (cmbr_cl * cmb_cl2dl)[cmbmsk], ls='--', c='k', label=f'CMB Lensing + r={r:.3f}')
+
+
+def _plot_label_title(tracers, tracer_aliases, i, j, convert_cl2dl, loglog):
+    """ Plot the label and title on the current plt axis """
+    if tracer_aliases is not None:
+        plt.title(f'{tracer_aliases[i]}\n{tracer_aliases[j]}')
+    else:
+        plt.title(f'{tracers[i]}\n{tracers[j]}')
+    plt.xlim(28, 330)
+    plt.xlabel(r"$\ell$")
+    if convert_cl2dl:
+        plt.ylabel(r"D$\ell^{BB}$ [$\mu$K$^2$]")
+    else:
+        plt.ylabel(r"$C_\ell^{BB}$ [$\mu$K$^2$]")
+    if loglog:
+        plt.loglog()
+    plt.legend()
+
+
+def _plot_savefig(output_dir, annotation, tracer_aliases, tracers, i, j):
+    """ Save the current plt figure """
+    if output_dir is not None:
+        if tracer_aliases is not None:
+            plt.savefig(f"{output_dir}/cls_{annotation}_{tracer_aliases[i]}_X_{tracer_aliases[j]}.png", bbox_inches='tight')
+        else:
+            plt.savefig(f"{output_dir}/cls_{annotation}_{tracers[i]}_X_{tracers[j]}.png", bbox_inches='tight')
+
+
 def plot_cls_best_fit_individual(
     cl_coadd_path : str,
     covar_path : str,
     tracers : list[str],
+    tracer_aliases : list[str] | None = None,
     loglog : bool = True,
     cl_emcee_path : str | None = None,
     output_dir : str | None = None,
@@ -241,52 +293,36 @@ def plot_cls_best_fit_individual(
     Plot the best fit power spectra outputed by the modified single point.
     """
     cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    cl_emcee = None
     if cl_emcee_path is not None:
         cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
     covar = sacc.Sacc.load_fits(covar_path)
 
     ntr = tracers.__len__()
+    if tracer_aliases is not None:
+        assert(len(tracer_aliases) == ntr)
 
     fg_cl2dl, fgmsk = _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl)
     cmb_cl2dl, cmbmsk, cmbr_cl = _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmbr1_cl, convert_cl2dl)
 
     for i, j in itertools.combinations_with_replacement(range(ntr), 2):
         e_l, dl= cl_coadd.get_ell_cl('cl_bb', tracers[i], tracers[j])
-        msk = (e_l > 30) * (e_l < 300)
-        plt.figure(figsize=(7, 5), dpi=300)
-        cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
-        var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
         if convert_cl2dl:
             cl2dl = e_l * (e_l - 1) / 2 / np.pi
         else:
             cl2dl = 1.0
+        msk = (e_l > 30) * (e_l < 300)
+        plt.figure(figsize=(7, 5), dpi=300)
+        cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
+        var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
         plt.errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk])
-        if cl_emcee_path is not None:
-            cl_emcee_single = cl_emcee[:, i, j]
-            block_cov = covar.covariance.covmat[cov_ind[msk]][:, cov_ind[msk]]
-            cl_diff = cl_emcee_single - dl[msk]
-            block_chi2 = (cl_diff * np.linalg.solve(block_cov, cl_diff)).sum()
-            plt.loglog(e_l[msk], cl_emcee_single, label=f'$\\chi^2=${block_chi2:.2f}\ndof = {msk.sum()}')
-            plt.legend()
-        plt.title(f'{tracers[i]}\n{tracers[j]}')
-        plt.xlim(28, 330)
-        plt.xlabel(r"$\ell$")
-        plt.ylabel(r"D$\ell^{BB}$ [$\mu$K$^2$]")
-        if loglog:
-            plt.loglog()
 
-        if dust_cl is not None:
-            plt.loglog(fg_ell[fgmsk], (np.sqrt(dust_cl[i] * dust_cl[j]) * fg_cl2dl)[fgmsk], ls='--', label='dust model')
-        if sync_cl is not None:
-            plt.loglog(fg_ell[fgmsk], (np.sqrt(sync_cl[i] * sync_cl[j]) * fg_cl2dl)[fgmsk], ls='.-', label='sync model')
-        if cmb_ell is not None:
-            plt.loglog(cmb_ell[cmbmsk], (cmbl_cl * cmb_cl2dl)[cmbmsk], ls='-', c='k', label='CMB Lensing')
-            if r is not None:
-                plt.loglog(cmb_ell[cmbmsk], (cmbr_cl * cmb_cl2dl)[cmbmsk], ls='--', c='k', label=f'CMB Lensing + r={r:.3f}')
-        plt.legend()
+        _plot_emcee_fit(cl_emcee_path, cl_emcee, covar, cov_ind, e_l, dl, msk, i, j)
+        _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmbr_cl, r, cmb_cl2dl, fgmsk, cmbmsk, i, j)
+        _plot_label_title(tracers, tracer_aliases, i, j, convert_cl2dl, loglog)
+        _plot_savefig(output_dir, annotation, tracer_aliases, tracers, i, j)
 
-        if output_dir is not None:
-            plt.savefig(f"{output_dir}/cls_best_fit{annotation}_{tracers[i]}_{tracers[j]}.png", bbox_inches='tight')
+        plt.close()
 
 
 def calc_block_chi2(

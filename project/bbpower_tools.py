@@ -210,14 +210,15 @@ def _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmb_r1_cl, convert_cl2dl):
         if r is not None:
             assert(cmb_r1_cl is not None)
             assert(cmb_r1_cl.shape[0] == cmb_ell.shape[0])
-            cmbr_cl = cmbl_cl + r * (cmb_r1_cl - cmbl_cl)
+            cmblr_cl = cmbl_cl + r * (cmb_r1_cl - cmbl_cl)
+            cmbr_cl = r * (cmb_r1_cl - cmbl_cl)
         else:
-            cmbr_cl = None
+            cmblr_cl, cmbr_cl = None, None
         if convert_cl2dl:
             cmb_cl2dl = cmb_ell * (cmb_ell - 1) / 2 / np.pi
         else:
             cmb_cl2dl = 1.0
-        return cmb_cl2dl, (cmb_ell > 30) * (cmb_ell < 300), cmbr_cl
+        return cmb_cl2dl, (cmb_ell > 30) * (cmb_ell < 300), cmblr_cl, cmbr_cl
     else:
         return None, None, None
 
@@ -233,16 +234,19 @@ def _plot_emcee_fit(cl_emcee_path, cl_emcee, covar, cov_ind, e_l, dl, msk, i, j)
 
 
 
-def _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmbr_cl, r, cmb_cl2dl, fgmsk, cmbmsk, i, j):
+def _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmblr_cl, cmbr_cl, r, cmb_cl2dl, fgmsk, cmbmsk, i, j):
     """ Plot foreground and CMB Cls on the current plt axis """
     if dust_cl is not None:
         plt.loglog(fg_ell[fgmsk], (np.sqrt(dust_cl[i] * dust_cl[j]) * fg_cl2dl)[fgmsk], ls='--', label='Dust')
     if sync_cl is not None:
         plt.loglog(fg_ell[fgmsk], (np.sqrt(sync_cl[i] * sync_cl[j]) * fg_cl2dl)[fgmsk], ls='-.', label='Sync')
+        if dust_cl is not None:
+            plt.loglog(fg_ell[fgmsk], ((np.sqrt(sync_cl[i] * sync_cl[j]) + np.sqrt(dust_cl[i] * dust_cl[j]))* fg_cl2dl)[fgmsk], ls='-.', label='D+S')
     if cmb_ell is not None:
-        plt.loglog(cmb_ell[cmbmsk], (cmbl_cl * cmb_cl2dl)[cmbmsk], ls='-', c='k', label='CMB Lensing')
+        plt.loglog(cmb_ell[cmbmsk], (cmbl_cl * cmb_cl2dl)[cmbmsk], ls='--', c='k', label='CMB Lensing')
         if r is not None:
-            plt.loglog(cmb_ell[cmbmsk], (cmbr_cl * cmb_cl2dl)[cmbmsk], ls='--', c='k', label=f'CMB Lensing + r={r:.3f}')
+            plt.loglog(cmb_ell[cmbmsk], (cmbr_cl * cmb_cl2dl)[cmbmsk], ls='-.', c='k', label=f'r={r:.3f}')
+            plt.loglog(cmb_ell[cmbmsk], (cmblr_cl * cmb_cl2dl)[cmbmsk], ls='-', c='k', label=f'CMB Lensing + r={r:.3f}')
 
 
 def _plot_label_title(tracers, tracer_aliases, i, j, convert_cl2dl, loglog):
@@ -303,7 +307,7 @@ def plot_cls_best_fit_individual(
         assert(len(tracer_aliases) == ntr)
 
     fg_cl2dl, fgmsk = _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl)
-    cmb_cl2dl, cmbmsk, cmbr_cl = _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmbr1_cl, convert_cl2dl)
+    cmb_cl2dl, cmbmsk, cmblr_cl, cmbr_cl = _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmbr1_cl, convert_cl2dl)
 
     for i, j in itertools.combinations_with_replacement(range(ntr), 2):
         e_l, dl= cl_coadd.get_ell_cl('cl_bb', tracers[i], tracers[j])
@@ -315,10 +319,11 @@ def plot_cls_best_fit_individual(
         plt.figure(figsize=(7, 5), dpi=300)
         cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
         var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
-        plt.errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk])
+        plt.errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk], ls='', fmt='.', capsize=3)
 
         _plot_emcee_fit(cl_emcee_path, cl_emcee, covar, cov_ind, e_l, dl, msk, i, j)
-        _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmbr_cl, r, cmb_cl2dl, fgmsk, cmbmsk, i, j)
+        _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmblr_cl, cmbr_cl, \
+                     r, cmb_cl2dl, fgmsk, cmbmsk, i, j)
         _plot_label_title(tracers, tracer_aliases, i, j, convert_cl2dl, loglog)
         _plot_savefig(output_dir, annotation, tracer_aliases, tracers, i, j)
 

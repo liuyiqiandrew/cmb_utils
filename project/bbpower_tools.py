@@ -275,7 +275,67 @@ def _plot_savefig(output_dir, annotation, tracer_aliases, tracers, i, j):
             plt.savefig(f"{output_dir}/cls_{annotation}_{tracers[i]}_X_{tracers[j]}.png", bbox_inches='tight')
 
 
-def plot_cls_best_fit_individual(
+def plot_cls_best_fit_individual_single(
+    cl_coadd_path : str,
+    covar_path : str,
+    tracer1 : str,
+    tracer2 : str,
+    tracers : list[str],
+    tracer_aliases : list[str] | None = None,
+    loglog : bool = True,
+    cl_emcee_path : str | None = None,
+    output_dir : str | None = None,
+    annotation : str = '_emcee',
+    convert_cl2dl : bool = True,
+    fg_ell : np.ndarray | None = None,
+    dust_cl : np.ndarray | None = None,
+    sync_cl : np.ndarray | None = None,
+    cmb_ell : np.ndarray | None = None,
+    cmbl_cl : np.ndarray | None = None,
+    r : float | None = None,
+    cmbr1_cl : np.ndarray | None = None,
+):
+    """
+    Plot the best fit power spectra outputed by the modified single point.
+    """
+    cl_coadd = sacc.Sacc.load_fits(cl_coadd_path)
+    cl_emcee = None
+    if cl_emcee_path is not None:
+        cl_emcee = np.load(cl_emcee_path, allow_pickle=True)['cls']
+    covar = sacc.Sacc.load_fits(covar_path)
+
+    ntr = tracers.__len__()
+    if tracer_aliases is not None:
+        assert(len(tracer_aliases) == ntr)
+
+    fg_cl2dl, fgmsk = _check_fg_cl_format(fg_ell, dust_cl, sync_cl, ntr, convert_cl2dl)
+    cmb_cl2dl, cmbmsk, cmblr_cl, cmbr_cl = _check_cmb_cl_format(cmb_ell, cmbl_cl, r, cmbr1_cl, convert_cl2dl)
+    
+    i = tracers.index(tracer1)
+    j = tracers.index(tracer2)
+    # for i, j in itertools.combinations_with_replacement(range(ntr), 2):
+    e_l, dl= cl_coadd.get_ell_cl('cl_bb', tracers[i], tracers[j])
+    if convert_cl2dl:
+        cl2dl = e_l * (e_l - 1) / 2 / np.pi
+    else:
+        cl2dl = 1.0
+    msk = (e_l > 30) * (e_l < 300)
+
+    plt.subplots(figsize=(7, 5), dpi=300)
+    cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
+    var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
+    plt.errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk], ls='', fmt='.', capsize=3)
+
+    _plot_emcee_fit(cl_emcee_path, cl_emcee, covar, cov_ind, e_l, dl, msk, i, j)
+    _plot_fg_cmb(fg_ell, dust_cl, sync_cl, fg_cl2dl, cmb_ell, cmbl_cl, cmblr_cl, cmbr_cl, \
+                    r, cmb_cl2dl, fgmsk, cmbmsk, i, j)
+    _plot_label_title(tracers, tracer_aliases, i, j, convert_cl2dl, loglog)
+    _plot_savefig(output_dir, annotation, tracer_aliases, tracers, i, j)
+
+    plt.close()
+
+
+def plot_cls_best_fit_individual_all(
     cl_coadd_path : str,
     covar_path : str,
     tracers : list[str],

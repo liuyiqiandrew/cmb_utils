@@ -321,7 +321,8 @@ def plot_cls_best_fit_individual_single(
         cl2dl = 1.0
     msk = (e_l > 30) * (e_l < 300)
 
-    plt.subplots(figsize=(7, 5), dpi=300)
+    # using fig axes
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=300)
     cov_ind = covar.indices('cl_bb', (tracers[i], tracers[j]))
     var = covar.covariance.covmat[cov_ind][:, cov_ind].diagonal()
     plt.errorbar(e_l[msk], dl[msk] * cl2dl[msk], np.sqrt(var)[msk] * cl2dl[msk], ls='', fmt='.', capsize=3)

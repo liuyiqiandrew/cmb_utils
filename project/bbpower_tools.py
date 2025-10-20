@@ -400,6 +400,120 @@ def plot_cls_best_fit_individual_all(
         plt.close()
 
 
+def _plot_labels():
+    lpow = .6
+    xticks = np.array((2, 10, 50, 100, 200, 300))
+    xtick_labels = [f"{i}" for i in xticks]
+    plt.xscale('function', functions=(lambda x: x**lpow, lambda x: x**(1/lpow)))
+    plt.xticks(ticks=xticks, labels=xtick_labels)
+    plt.xlim(1, 350)
+    plt.yscale('log')
+    plt.legend()
+    plt.xlabel(r"$\ell$")
+    plt.ylabel(r"D$\ell^{BB}$ [$\mu$K$^2$]")
+    
+    
+def _collect_errorbar(errbars, a):
+    for container in a.containers:
+        if isinstance(container, ErrorbarContainer):
+            for child in container.get_children():
+                errbars.add(child)
+
+                
+def _recreate_lines(errbars, a, colors, labels, i, ax):
+    for line in a.get_lines():
+        if line in errbars:
+            continue  # Skip errorbar internals
+
+        label = line.get_label()
+        color = 'k' if ('CMB' in label and i == 0) else colors[i % len(colors)]
+        if i != 0 and 'CMB' in label:
+            continue
+
+        ax.plot(line.get_xdata(), line.get_ydata(),
+                label=(label if 'CMB' in label else f"{label} {labels[i]}"),
+                color=color,
+                linestyle=line.get_linestyle(),
+                marker=line.get_marker())
+
+
+def _recreate_errorbar_data(ax, a, colors, labels, voffset, i, errorbar_on=True):
+    for container in a.containers:
+        if not isinstance(container, ErrorbarContainer):
+            continue
+
+        data_line = container.lines[0] if container.lines else None
+        cap_lines = container.lines[1] if len(container.lines) > 1 else []
+        barlinecols = container.lines[2] if len(container.lines) > 2 else ()
+
+        if data_line is None:
+            continue
+
+        x = data_line.get_xdata()
+        y = data_line.get_ydata()
+        color = colors[i % len(colors)]
+
+        # Main data points
+        ax.plot(x + voffset * i, y,
+                color=color,
+                marker=data_line.get_marker(),
+                linestyle=data_line.get_linestyle(),
+                label=labels[i])
+
+        if errorbar_on:
+            _recreate_errorbar_bar(ax, barlinecols, caplines, color, voffset, i)
+            
+
+def _recreate_errorbar_bar(ax, barlinecols, caplines, color, voffset, i):
+    # Error bar vertical/horizontal segments
+    for coll in barlinecols:
+        for seg in coll.get_segments():
+            xseg, yseg = seg[:, 0], seg[:, 1]
+            xshift = xseg.mean() + voffset * i
+            ax.plot(xseg - xseg.mean() + xshift, yseg,
+                    color=color, alpha=0.7, zorder=0)
+    # Caps
+    for cap in cap_lines:
+        xcap, ycap = cap.get_xdata(), cap.get_ydata()
+        ax.plot(xcap + voffset * i, ycap,
+                color=color, alpha=0.7, ls='', marker='_')
+
+
+def combine_axes(
+    ax_list, 
+    labels=None, 
+    colors=None, 
+    lpow=.6, 
+    voffset=0,
+    errorbar_on=True
+):
+    """Combine multiple Matplotlib Axes into one, preserving lines, and errorbars."""
+    if labels is None:
+        labels = [f'{i}' for i in range(len(ax_list))]
+    else:
+        assert len(labels) == len(ax_list), "labels length must match ax_list length"
+    
+    if colors is None:
+        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+    fig, ax = plt.subplots(dpi=300, figsize=(10, 8))
+
+    for i, a in enumerate(ax_list):
+        # --- Identify all errorbar-related lines to avoid double plotting ---
+        errorbar_lines = set()
+        _collect_errorbar(errorbar_lines, a)
+
+        # --- Normal lines (excluding errorbar children) ---
+        _recreate_lines(errorbar_lines, a, colors, labels, i, ax)
+
+        # --- Errorbars ---
+        _recreate_errorbar_data(ax, a, colors, labels, voffset, i, errorbar_on)
+
+    # Apply your custom power-law and labeling
+    _plot_labels()
+    return fig, ax
+
+
 def calc_block_chi2(
     cl_coadd_path: str, 
     covar_path: str, 

@@ -78,6 +78,7 @@ def _ell_window(lmax: int, ell0: float, dell: float, mode: str = "C2") -> np.nda
         s = t**3 * (10.0 + t * (-15.0 + 6.0 * t))  # C2
     else:
         raise ValueError("mode must be 'C1' or 'C2'")
+    return s
     
 
 def highpass_ell_iqu_smooth(
@@ -157,4 +158,130 @@ def highpass_ell_iqu_smooth(
 
     if return_alms:
         return out, f, (almT, almE, almB)
+    return out
+
+
+def _m_window(mmax: int, m0: float, dm: float, mode: str = "C2", kind: str = "highpass") -> np.ndarray:
+    """
+    Window w(m) in [0,1] over m = 0..mmax.
+
+    highpass: suppress low m (w~0 for m<m0, w~1 for m>m0)
+    lowpass : keep low m (w~1 for m<m0, w~0 for m>m0)
+
+    If dm<=0 -> hard step.
+    """
+    m = np.arange(mmax + 1, dtype=np.float64)
+
+    if dm <= 0:
+        w = (m > m0).astype(np.float64)  # hard high-pass
+    else:
+        x = (m - m0) / float(dm)           # -1..+1 across transition
+        t = np.clip((x + 1.0) * 0.5, 0.0, 1.0)
+
+        mode_u = mode.upper()
+        if mode_u == "C1":
+            w = 0.5 - 0.5 * np.cos(np.pi * t)  # raised cosine (C1)
+        elif mode_u == "C2":
+            w = t**3 * (10.0 + t * (-15.0 + 6.0 * t))  # quintic smoothstep (C2)
+        else:
+            raise ValueError("mode must be 'C1' or 'C2'")
+
+    kind_l = kind.lower()
+    if kind_l == "highpass":
+        return w
+    if kind_l == "lowpass":
+        return 1.0 - w
+    raise ValueError("kind must be 'highpass' or 'lowpass'")
+
+
+def hp_mcut_iqu_smooth(
+    maps: np.ndarray,
+    m0: float,
+    dm: float = 0.0,
+    *,
+    lmax: int | None = None,
+    iter: int = 0,
+    mode: str = "C2",
+    kind: str = "highpass",
+    apply_T: bool = True,
+    return_alms: bool = False,
+):
+    """
+    Apply an m-cut (optionally smooth) to a HEALPix map in harmonic space.
+
+    Input:
+      - maps shape (npix,)  -> T-only
+      - maps shape (3,npix) -> (I,Q,U), implemented via (T,E,B) alms
+
+    The cut is applied as: alm_{l m} <- alm_{l m} * w(m)  (for m>=0; real-map symmetry implied)
+
+    Parameters
+    ----------
+    m0 : float
+        Cut center in m.
+    dm : float
+        Half-width of smooth transition in m. dm=0 gives a hard step.
+    kind : {'highpass','lowpass'}
+        highpass removes low m (keeps high m). lowpass keeps low m.
+    apply_T : bool
+        If True, apply the same m-window to I/T as well. If False, leave I unchanged (for IQU input).
+    return_alms : bool
+        If True, return filtered alms and w(m).
+
+    Returns
+    -------
+    maps_filt : array
+        Same shape as input.
+    w_m : array, optional
+        Window over m=0..lmax.
+    alms : tuple, optional
+        (almT,) for T-only or (almT, almE, almB) for IQU input.
+    """
+    maps = np.asarray(maps)
+
+    def _apply_mwindow_inplace(alm, w_m, lmax):
+        # healpy stores only m>=0 in packed format. For fixed m, l runs contiguously.
+        for m in range(lmax + 1):
+            w = w_m[m]
+            if w == 1.0:
+                continue
+            i0 = hp.Alm.getidx(lmax, m, m)
+            i1 = hp.Alm.getidx(lmax, lmax, m)
+            alm[i0:i1 + 1] *= w
+
+    if maps.ndim == 1:
+        nside = hp.get_nside(maps)
+        if lmax is None:
+            lmax = 3 * nside - 1
+        aT = hp.map2alm(maps, lmax=lmax, iter=iter)
+
+        w_m = _m_window(lmax, m0, dm, mode=mode, kind=kind)
+        _apply_mwindow_inplace(aT, w_m, lmax)
+
+        mout = hp.alm2map(aT, nside=nside, lmax=lmax, verbose=False)
+        if return_alms:
+            return mout, w_m, (aT,)
+        return mout
+
+    if maps.ndim != 2 or maps.shape[0] != 3:
+        raise ValueError("maps must have shape (npix,) or (3, npix) for (I,Q,U).")
+
+    I, Q, U = maps
+    nside = hp.get_nside(I)
+    if lmax is None:
+        lmax = 3 * nside - 1
+
+    almT, almE, almB = hp.map2alm([I, Q, U], lmax=lmax, iter=iter, pol=True)
+
+    w_m = _m_window(lmax, m0, dm, mode=mode, kind=kind)
+    if apply_T:
+        _apply_mwindow_inplace(almT, w_m, lmax)
+    _apply_mwindow_inplace(almE, w_m, lmax)
+    _apply_mwindow_inplace(almB, w_m, lmax)
+
+    I2, Q2, U2 = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=True, verbose=False)
+    out = np.stack([I2, Q2, U2], axis=0)
+
+    if return_alms:
+        return out, w_m, (almT, almE, almB)
     return out

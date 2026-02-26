@@ -81,7 +81,7 @@ def _ell_window(lmax: int, ell0: float, dell: float, mode: str = "C2") -> np.nda
     return s
     
 
-def highpass_ell_iqu_smooth(
+def hp_ell_iqu_smooth(
     maps: np.ndarray,
     ell0: float,
     dell: float = 0.0,

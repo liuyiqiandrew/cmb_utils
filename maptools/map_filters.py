@@ -1,7 +1,7 @@
 import numpy as np
 import healpy as hp
 
-def highpass_iqu_ellcut(iqu_map, ell_cut, lmax=None, pol=True, verbose=False):
+def highpass_iqu_ellcut(iqu_map, ell_cut, lmax=None, pol=True):
     """
     High-pass filter an IQU map by removing multipoles with ell < ell_cut.
 
@@ -37,7 +37,7 @@ def highpass_iqu_ellcut(iqu_map, ell_cut, lmax=None, pol=True, verbose=False):
         raise ValueError(f"ell_cut must be in [0, {lmax+1}] for this lmax.")
 
     # Map -> alm (T, E, B)
-    almT, almE, almB = hp.map2alm(m, lmax=lmax, pol=pol, verbose=verbose)
+    almT, almE, almB = hp.map2alm(m, lmax=lmax, pol=pol)
 
     # Zero low-ell modes
     if ell_cut > 0:
@@ -45,7 +45,7 @@ def highpass_iqu_ellcut(iqu_map, ell_cut, lmax=None, pol=True, verbose=False):
             hp.almxfl(alm, np.array([0.0] * ell_cut + [1.0] * (lmax - ell_cut + 1)), inplace=True)
 
     # alm -> map
-    iqu_hp = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=pol, verbose=verbose)
+    iqu_hp = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=pol)
 
     # Ensure (3, npix)
     return np.asarray(iqu_hp)
@@ -132,7 +132,7 @@ def hp_ell_iqu_smooth(
         aT = hp.map2alm(maps, lmax=lmax, iter=iter)
         f = _ell_window(lmax, ell0, dell, mode=mode)
         hp.almxfl(aT, f, inplace=True)
-        mout = hp.alm2map(aT, nside=nside, lmax=lmax, verbose=False)
+        mout = hp.alm2map(aT, nside=nside, lmax=lmax)
         if return_alms:
             return mout, f, (aT,)
         return mout
@@ -153,7 +153,7 @@ def hp_ell_iqu_smooth(
     hp.almxfl(almE, f, inplace=True)
     hp.almxfl(almB, f, inplace=True)
 
-    I2, Q2, U2 = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=True, verbose=False)
+    I2, Q2, U2 = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=True)
     out = np.stack([I2, Q2, U2], axis=0)
 
     if return_alms:
@@ -258,7 +258,7 @@ def hp_mcut_iqu_smooth(
         w_m = _m_window(lmax, m0, dm, mode=mode, kind=kind)
         _apply_mwindow_inplace(aT, w_m, lmax)
 
-        mout = hp.alm2map(aT, nside=nside, lmax=lmax, verbose=False)
+        mout = hp.alm2map(aT, nside=nside, lmax=lmax)
         if return_alms:
             return mout, w_m, (aT,)
         return mout
@@ -279,7 +279,7 @@ def hp_mcut_iqu_smooth(
     _apply_mwindow_inplace(almE, w_m, lmax)
     _apply_mwindow_inplace(almB, w_m, lmax)
 
-    I2, Q2, U2 = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=True, verbose=False)
+    I2, Q2, U2 = hp.alm2map([almT, almE, almB], nside=nside, lmax=lmax, pol=True)
     out = np.stack([I2, Q2, U2], axis=0)
 
     if return_alms:

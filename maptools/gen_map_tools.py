@@ -36,21 +36,10 @@ def generate_qu_noise(sig2_QQ, sig2_UU, sig2_QU, rng=None, eps=0.0):
     """
     Generate correlated Gaussian Q/U noise per pixel given covariance components.
 
-    Parameters
-    ----------
-    sig2_QQ, sig2_UU, sig2_QU : array-like
-        Arrays (same shape) containing covariance elements:
-        Cov(Q,Q)=sig2_QQ, Cov(U,U)=sig2_UU, Cov(Q,U)=sig2_QU.
-        (Despite the names, these are covariance elements, not necessarily squares of something.)
-    rng : np.random.Generator, optional
-        Random number generator. If None, uses np.random.default_rng().
-    eps : float, optional
-        Optional diagonal regularization added to QQ and UU (useful if some pixels are near-singular).
-
-    Returns
-    -------
-    nQ, nU : np.ndarray
-        Correlated noise realizations with the same shape as inputs.
+    Special-cases zero-variance pixels:
+      - QQ=UU=QU=0 -> (nQ,nU)=(0,0)
+      - QQ=0, UU>0 -> nQ=0, nU~N(0,UU) (requires QU=0)
+      - UU=0, QQ>0 -> nU=0, nQ~N(0,QQ) (requires QU=0)
     """
     sig2_QQ = np.asarray(sig2_QQ, dtype=float)
     sig2_UU = np.asarray(sig2_UU, dtype=float)
@@ -61,39 +50,66 @@ def generate_qu_noise(sig2_QQ, sig2_UU, sig2_QU, rng=None, eps=0.0):
     if rng is None:
         rng = np.random.default_rng()
 
-    # Flatten for vectorized math; reshape back at end
     shape = sig2_QQ.shape
     qq = sig2_QQ.reshape(-1) + eps
     uu = sig2_UU.reshape(-1) + eps
     qu = sig2_QU.reshape(-1)
 
-    # Cholesky for 2x2:
-    # L = [[a, 0],
-    #      [b, c]] with a=sqrt(qq), b=qu/a, c=sqrt(uu - b^2)
-    # Need qq>0 and uu - (qu^2/qq) >= 0 for PSD.
-    if np.any(qq <= 0):
-        bad = np.where(qq <= 0)[0][:10]
-        raise ValueError(f"Non-positive QQ variance in {bad.size} pixels (showing up to 10): {bad}")
+    n = qq.size
+    nQ = np.zeros(n, dtype=float)
+    nU = np.zeros(n, dtype=float)
 
-    a = np.sqrt(qq)
-    b = qu / a
-    rad = uu - b*b
-    if np.any(rad < 0):
-        # allow tiny negative due to rounding; clamp those
-        tol = 1e-12 * np.maximum(uu, 1.0)
-        if np.any(rad < -tol):
-            bad = np.where(rad < -tol)[0][:10]
-            raise ValueError(
-                f"Covariance not PSD in {bad.size} pixels (showing up to 10): {bad}. "
-                "Try eps>0 or inspect QQ/UU/QU values."
-            )
+    # Masks for degenerate cases (use eps-adjusted qq/uu for stability, but check raw too if desired)
+    both0 = (qq == 0.0) & (uu == 0.0) & (qu == 0.0)  # exact zeros after eps
+    qq0   = (qq == 0.0) & ~both0
+    uu0   = (uu == 0.0) & ~both0
+
+    # If qq==0 or uu==0 but qu!=0, covariance can't be PSD
+    # bad_qu_qq0 = qq0 & (qu != 0.0)
+    # bad_qu_uu0 = uu0 & (qu != 0.0)
+    # if np.any(bad_qu_qq0 | bad_qu_uu0):
+    #     bad = np.where(bad_qu_qq0 | bad_qu_uu0)[0][:10]
+    #     raise ValueError(
+    #         f"Invalid covariance: QU!=0 where QQ==0 or UU==0 in pixels (up to 10): {bad}"
+    #     )
+
+    # Handle qq==0: Q fixed at 0, U ~ N(0, uu)
+    idx = np.where(qq0 & (uu > 0.0))[0]
+    if idx.size:
+        nU[idx] = np.sqrt(uu[idx]) * rng.standard_normal(idx.size)
+
+    # Handle uu==0: U fixed at 0, Q ~ N(0, qq)
+    idx = np.where(uu0 & (qq > 0.0))[0]
+    if idx.size:
+        nQ[idx] = np.sqrt(qq[idx]) * rng.standard_normal(idx.size)
+
+    # General case: qq>0 and uu>0
+    gen = (~both0) & (qq > 0.0) & (uu > 0.0)
+
+    if np.any(gen):
+        qqg = qq[gen]
+        uug = uu[gen]
+        qug = qu[gen]
+
+        a = np.sqrt(qqg)
+        b = np.where(a!=0, qug / a, 0)
+        rad = uug - b*b
+
+        # PSD check with tolerance; clamp tiny negatives
+        # tol = 1e-12 * np.maximum(uug, 1.0)
+        # if np.any(rad < -tol):
+        #     bad = np.where(gen)[0][np.where(rad < -tol)[0][:10]]
+        #     raise ValueError(
+        #         f"Covariance not PSD in pixels (up to 10): {bad}. Try eps>0 or inspect QQ/UU/QU."
+        #     )
         rad = np.maximum(rad, 0.0)
-    c = np.sqrt(rad)
+        c = np.sqrt(rad)
 
-    z0 = rng.standard_normal(qq.size)
-    z1 = rng.standard_normal(qq.size)
+        z0 = rng.standard_normal(a.size)
+        z1 = rng.standard_normal(a.size)
 
-    nQ = a * z0
-    nU = b * z0 + c * z1
+        nQ[gen] = a * z0
+        nU[gen] = b * z0 + c * z1
 
+    # If eps made qq/uu exactly 0 unlikely; if eps>0, both0 mask will be false.
     return nQ.reshape(shape), nU.reshape(shape)

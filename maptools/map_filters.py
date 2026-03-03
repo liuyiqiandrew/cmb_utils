@@ -51,6 +51,21 @@ def highpass_iqu_ellcut(iqu_map, ell_cut, lmax=None, pol=True):
     return np.asarray(iqu_hp)
 
 
+def _namaster_c_window(x: np.ndarray, mode: str) -> np.ndarray:
+    """
+    NaMaster-style C1/C2 transition windows for x in [0, 1].
+
+    C1: x - sin(2*pi*x)/(2*pi)
+    C2: 0.5 * (1 - cos(pi*x))
+    """
+    mode_u = mode.upper()
+    if mode_u == "C1":
+        return x - np.sin(2.0 * np.pi * x) / (2.0 * np.pi)
+    if mode_u == "C2":
+        return 0.5 * (1.0 - np.cos(np.pi * x))
+    raise ValueError("mode must be 'C1' or 'C2'")
+
+
 def _ell_window(lmax: int, ell0: float, dell: float, mode: str = "C2") -> np.ndarray:
     """
     High-pass harmonic window in ell with smooth transition.
@@ -60,7 +75,7 @@ def _ell_window(lmax: int, ell0: float, dell: float, mode: str = "C2") -> np.nda
       f=1 for ell >= ell0+dell
       smooth on [ell0-dell, ell0+dell]
 
-    mode: 'C1' (raised cosine) or 'C2' (quintic smoothstep)
+    mode: 'C1' or 'C2' (NaMaster definitions)
     """
     ell = np.arange(lmax + 1, dtype=np.float64)
 
@@ -71,14 +86,7 @@ def _ell_window(lmax: int, ell0: float, dell: float, mode: str = "C2") -> np.nda
     x = (ell - ell0) / float(dell)           # -1..+1 in transition
     t = np.clip((x + 1.0) * 0.5, 0.0, 1.0)   # 0..1
 
-    mode_u = mode.upper()
-    if mode_u == "C1":
-        s = 0.5 - 0.5 * np.cos(np.pi * t)  # C1
-    elif mode_u == "C2":
-        s = t**3 * (10.0 + t * (-15.0 + 6.0 * t))  # C2
-    else:
-        raise ValueError("mode must be 'C1' or 'C2'")
-    return s
+    return _namaster_c_window(t, mode)
     
 
 def hp_ell_iqu_smooth(
@@ -178,13 +186,7 @@ def _m_window(mmax: int, m0: float, dm: float, mode: str = "C2", kind: str = "hi
         x = (m - m0) / float(dm)           # -1..+1 across transition
         t = np.clip((x + 1.0) * 0.5, 0.0, 1.0)
 
-        mode_u = mode.upper()
-        if mode_u == "C1":
-            w = 0.5 - 0.5 * np.cos(np.pi * t)  # raised cosine (C1)
-        elif mode_u == "C2":
-            w = t**3 * (10.0 + t * (-15.0 + 6.0 * t))  # quintic smoothstep (C2)
-        else:
-            raise ValueError("mode must be 'C1' or 'C2'")
+        w = _namaster_c_window(t, mode)
 
     kind_l = kind.lower()
     if kind_l == "highpass":
